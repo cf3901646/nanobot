@@ -517,10 +517,26 @@ class MemoryStore:
             return None
 
         batch = entries[:max_entries]
-        history_text = "\n".join(
-            f"[{e['timestamp']}] {truncate_text(e['content'], 1000)}"
-            for e in batch
-        )
+        # Use a token budget for the batch instead of per-entry char cap
+        # This ensures entries reach Dream whole until the budget is exhausted
+        history_lines = []
+        token_budget = 8000  # 8k tokens for Dream prompt
+        tokens_used = 0
+        
+        for e in batch:
+            # Estimate tokens for this entry
+            entry_text = f"[{e['timestamp']}] {e['content']}"
+            entry_tokens = estimate_prompt_tokens_chain(entry_text)
+            
+            # If adding this entry would exceed the budget and we've already
+            # included at least one entry, stop adding more
+            if tokens_used > 0 and tokens_used + entry_tokens > token_budget:
+                break
+                
+            history_lines.append(entry_text)
+            tokens_used += entry_tokens
+        
+        history_text = "\n".join(history_lines)
         template = self._dream_template()
         prompt = f"{template}\n\n## Conversation History\n{history_text}"
         return (prompt, batch[-1]["cursor"])
